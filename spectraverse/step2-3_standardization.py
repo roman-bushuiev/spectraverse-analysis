@@ -3,6 +3,9 @@ import os, glob, re
 import pandas as pd
 import sys
 from rdkit import Chem
+
+STANDARDIZE_TAUTOMERS = os.environ.get("SPECTRAVERSE_STANDARDIZE_TAUTOMERS", "true").strip().lower() == "true"
+print(f"[step2-3 config] standardize_tautomers={STANDARDIZE_TAUTOMERS} (env SPECTRAVERSE_STANDARDIZE_TAUTOMERS)")
 from rdkit.Chem import AllChem
 from rdkit.Chem import Descriptors
 from rdkit.Chem.MolStandardize import rdMolStandardize
@@ -42,12 +45,14 @@ metadata = metadata[metadata['PRECURSOR_MZ'] <= 1000]
 
 metadata_columns = list(metadata.columns)
 
-smiles_na_cleaned_file = git_dir + '/data/spectra/benchmark/no_smiles_link_new.csv'
-ref = pd.read_csv(smiles_na_cleaned_file)
-
-smiles_na_unique = ref['COMPOUND_NAME'].unique()
-for i, compound in enumerate(smiles_na_unique):
-    metadata.loc[(metadata['SMILES'].isna()) & (metadata['COMPOUND_NAME'] == compound), 'SMILES'] = ref['SMILES'][i]
+smiles_na_cleaned_file = os.environ.get("SPECTRAVERSE_SMILES_REPAIR_CSV", "")
+if smiles_na_cleaned_file and os.path.exists(smiles_na_cleaned_file):
+    ref = pd.read_csv(smiles_na_cleaned_file)
+    smiles_na_unique = ref['COMPOUND_NAME'].unique()
+    for i, compound in enumerate(smiles_na_unique):
+        metadata.loc[(metadata['SMILES'].isna()) & (metadata['COMPOUND_NAME'] == compound), 'SMILES'] = ref['SMILES'][i]
+else:
+    print(f"Skipping SMILES-NA repair (SPECTRAVERSE_SMILES_REPAIR_CSV not set or file missing)")
 
 metadata = metadata[metadata['SMILES'].notna()]
 metadata_index = metadata.index
@@ -217,7 +222,9 @@ def NeutraliseCharges(mol, reactions=None):
             mol = rms[0]
     return mol
 
-def preprocess_mol(smiles, stereochem=False, standardize_tautomers=True):
+def preprocess_mol(smiles, stereochem=False, standardize_tautomers=None):
+    if standardize_tautomers is None:
+        standardize_tautomers = STANDARDIZE_TAUTOMERS
     """
     SMILES preprocessing and standardization pipeline:
     1. Load molecule in RDKit
@@ -441,23 +448,26 @@ def normalize_adduct(adduct):
         return adduct    
     return adduct.rstrip('+-')
 
-for i in range(metadata.shape[0]):
-    orig_adduct = metadata['ORIG_ADDUCT'].iloc[i]
-    adduct = metadata['ADDUCT'].iloc[i]
-    if normalize_adduct(orig_adduct) != normalize_adduct(adduct) and orig_adduct in adduct_mass_adjustments and adduct in adduct_mass_adjustments:
-        parent_mass = metadata['EXACT_MASS_CANONICAL'].iloc[i]
-        precusor_mz = metadata['PRECURSOR_MZ'].iloc[i]
-    
-        mass_diff = precusor_mz - parent_mass
+if 'ORIG_ADDUCT' in metadata.columns:
+    for i in range(metadata.shape[0]):
+        orig_adduct = metadata['ORIG_ADDUCT'].iloc[i]
+        adduct = metadata['ADDUCT'].iloc[i]
+        if normalize_adduct(orig_adduct) != normalize_adduct(adduct) and orig_adduct in adduct_mass_adjustments and adduct in adduct_mass_adjustments:
+            parent_mass = metadata['EXACT_MASS_CANONICAL'].iloc[i]
+            precusor_mz = metadata['PRECURSOR_MZ'].iloc[i]
 
-        orig_adduct_value = adduct_mass_adjustments.get(orig_adduct)
-        adduct_value = adduct_mass_adjustments.get(adduct)
+            mass_diff = precusor_mz - parent_mass
 
-        orig_adduct_diff = abs(mass_diff - orig_adduct_value)
-        adduct_diff = abs(mass_diff - adduct_value)
+            orig_adduct_value = adduct_mass_adjustments.get(orig_adduct)
+            adduct_value = adduct_mass_adjustments.get(adduct)
 
-        if orig_adduct_diff < adduct_diff:
-            metadata['ADDUCT'].iloc[i] = orig_adduct
+            orig_adduct_diff = abs(mass_diff - orig_adduct_value)
+            adduct_diff = abs(mass_diff - adduct_value)
+
+            if orig_adduct_diff < adduct_diff:
+                metadata['ADDUCT'].iloc[i] = orig_adduct
+else:
+    print("Skipping ORIG_ADDUCT-based correction (column absent)")
 
 info = extract_info(temp_mgf_dir, metadata_index)
 

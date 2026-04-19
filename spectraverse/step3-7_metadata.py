@@ -93,6 +93,13 @@ with open(temp_mgf, 'r') as file:
 
 df = pd.DataFrame(rows)
 
+# Ensure expected columns exist (some inputs may lack specific CE/NCE fields)
+for _required_col in ['COLLISION_ENERGY', 'COLLISION_ENERGY_2', 'COLLISION_ENERGY_3',
+                       'COLLISION_ENERGY_VOLTAGE', 'NORMALIZED_COLLISION_ENERGY',
+                       'NOMRALIZED_COLLISION_ENERGY']:
+    if _required_col not in df.columns:
+        df[_required_col] = np.nan
+
 def process_charge(row):
     if row['CHARGE'] == '0':
         if row['IONMODE'] == 'positive':
@@ -566,12 +573,20 @@ with open(output_mgf_dir, 'w') as mgf_file:
         mgf_file.write("MS_LEVEL={}\n".format(df['MS_LEVEL'][i]))
         mgf_file.write("CHARGE={}\n".format(df['CHARGE'][i]))
         mgf_file.write("INSTRUMENT_TYPE={}\n".format(df['INSTRUMENT_TYPE'][i]))
-        mgf_file.write("COLLISION_ENERGY_1={}\n".format(df['COLLISION_ENERGY_1'][i]))
-        mgf_file.write("COLLISION_ENERGY_2={}\n".format(df['COLLISION_ENERGY_2'][i]))
-        mgf_file.write("COLLISION_ENERGY_3={}\n".format(df['COLLISION_ENERGY_3'][i]))
-        mgf_file.write("NORMALIZED_COLLISION_ENERGY_1={}\n".format(df['NORMALIZED_COLLISION_ENERGY_1'][i]))
-        mgf_file.write("NORMALIZED_COLLISION_ENERGY_2={}\n".format(df['NORMALIZED_COLLISION_ENERGY_2'][i]))
-        mgf_file.write("NORMALIZED_COLLISION_ENERGY_3={}\n".format(df['NORMALIZED_COLLISION_ENERGY_3'][i]))
+        _ce_cols = sorted(
+            [c for c in df.columns if re.match(r'^COLLISION_ENERGY_\d+$', c)],
+            key=lambda c: int(c.rsplit('_', 1)[1]),
+        )
+        _nce_cols = sorted(
+            [c for c in df.columns if re.match(r'^NORMALIZED_COLLISION_ENERGY_\d+$', c)],
+            key=lambda c: int(c.rsplit('_', 1)[1]),
+        )
+        for _col in _ce_cols:
+            mgf_file.write("{}={}\n".format(_col, df[_col][i]))
+        for _col in _nce_cols:
+            mgf_file.write("{}={}\n".format(_col, df[_col][i]))
+        if 'COLLISION_ENERGIES_ALL' in df.columns:
+            mgf_file.write("COLLISION_ENERGIES_ALL={}\n".format(df['COLLISION_ENERGIES_ALL'][i]))
 
         for line in temp_info[i]:
             if re.match(r'^\d', line):
