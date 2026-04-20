@@ -52,7 +52,7 @@ metadata = metadata[~metadata['ADDUCT'].isin(additional_adduct)]
 
 metadata['ADDUCT'] = metadata['ADDUCT'].replace('[M+Hac-H]-', '[M+CH3COO]-')
 
-metadata['ppm_error'] = ''
+metadata['ppm_error'] = np.nan
 
 # ref: https://github.com/matchms/matchms/blob/1f904e0d469aef35dbba8b7b2d7b52886f3f75cc/matchms/data/known_adducts_table.csv#L56
 adduct_mass_adjustments = {
@@ -72,14 +72,19 @@ adduct_mass_adjustments = {
 def ppm_error(expt, theo):
     return abs((expt - theo) / expt) * 1e6
 
+_ppm_col = metadata.columns.get_loc('ppm_error')
 for i in range(len(metadata)):
     adduct = metadata['ADDUCT'].iloc[i]
     if adduct in adduct_mass_adjustments:
         theo = metadata['PARENT_MASS'].iloc[i] + adduct_mass_adjustments[adduct]
         expt = metadata['PRECURSOR_MZ'].iloc[i]
-        metadata['ppm_error'].iloc[i] = ppm_error(expt, theo)     
+        metadata.iloc[i, _ppm_col] = ppm_error(expt, theo)
 
-metadata = metadata[metadata['ppm_error'] <= 10]
+# Keep rows with a valid adduct+mass match (ppm_error <= 10) OR rows where the
+# adduct wasn't in adduct_mass_adjustments (ppm_error stays NaN — we don't have
+# enough info to reject them on mass grounds, so we preserve them).
+metadata['ppm_error'] = pd.to_numeric(metadata['ppm_error'], errors='coerce')
+metadata = metadata[metadata['ppm_error'].isna() | (metadata['ppm_error'] <= 10)]
 
 adduct_m_minus = metadata[metadata['ADDUCT'] == '[M]-']
 
