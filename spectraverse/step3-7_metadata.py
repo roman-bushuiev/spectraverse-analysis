@@ -45,6 +45,36 @@ info_orig_dict = {
     for sublist in info_orig
 }
 
+
+def _native_spectrum_id(sublist):
+    """Best available per-spectrum provenance ID from the original (pre-curation) block.
+
+    Sources differ in which native key they carry: enveda/Spectraverse use TITLE,
+    Merlin uses FEATURE_ID/SPECTRUMID. Falls back to a SOURCE#INDEX locator so the
+    column is always populated.
+    """
+    fields = {}
+    for it in sublist:
+        if '=' in it:
+            k, v = it.split('=', 1)
+            fields[k.strip()] = v.strip()
+    # Prefer a globally-unique spectrum reference: TITLE (enveda/Spectraverse) or the
+    # first USI mzspec (Merlin). Feature-level keys (FEATURE_ID/SPECTRUMID) repeat across
+    # files, so they are intentionally excluded. SOURCE#INDEX is the guaranteed fallback.
+    if fields.get('TITLE'):
+        return fields['TITLE']
+    if fields.get('USI'):
+        return fields['USI'].split(',')[0].strip()
+    return f"{fields.get('SOURCE', '?')}#{fields.get('INDEX', '?')}"
+
+
+orig_native_id_by_key = {}
+for sublist in info_orig:
+    idx_v = next((it.split('=', 1)[1].strip() for it in sublist if it.startswith('INDEX=')), None)
+    src_v = next((it.split('=', 1)[1].strip() for it in sublist if it.startswith('SOURCE=')), None)
+    if idx_v is not None and src_v is not None:
+        orig_native_id_by_key[(idx_v, src_v)] = _native_spectrum_id(sublist)
+
 for sublist2 in info_processed:
     index2 = [item for item in sublist2 if item.startswith('INDEX=')][0]
     source2 = [item for item in sublist2 if item.startswith('SOURCE=')][0]
@@ -545,6 +575,12 @@ temp_info = extract_info_index(temp_mgf, df_index)
 
 df = df.reset_index(drop=True)
 df.insert(0, 'TITLE', df.index.to_series().apply(lambda x: f"SPECTRAVERSE{x + 1:10d}"))
+# Preserve per-spectrum provenance before INDEX is dropped: native source ID + pipeline locator.
+df['ORIGINAL_ID'] = [
+    orig_native_id_by_key.get((str(_i).strip(), str(_s).strip()))
+    for _i, _s in zip(df['INDEX'], df['SOURCE'])
+]
+df['ORIGINAL_INDEX'] = df['INDEX']
 df = df.drop(columns=['INDEX'])
 
 
