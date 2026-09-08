@@ -46,34 +46,54 @@ info_orig_dict = {
 }
 
 
-def _native_spectrum_id(sublist):
-    """Best available per-spectrum provenance ID from the original (pre-curation) block.
-
-    Sources differ in which native key they carry: enveda/Spectraverse use TITLE,
-    Merlin uses FEATURE_ID/SPECTRUMID. Falls back to a SOURCE#INDEX locator so the
-    column is always populated.
-    """
+def _fields_of(sublist):
     fields = {}
     for it in sublist:
         if '=' in it:
             k, v = it.split('=', 1)
             fields[k.strip()] = v.strip()
-    # Prefer a globally-unique spectrum reference: TITLE (enveda/Spectraverse) or the
-    # first USI mzspec (Merlin). Feature-level keys (FEATURE_ID/SPECTRUMID) repeat across
-    # files, so they are intentionally excluded. SOURCE#INDEX is the guaranteed fallback.
+    return fields
+
+
+def _clean_source(src):
+    return src[:-4] if src.endswith('.mgf') else src
+
+
+def _native_spectrum_id(sublist):
+    """Deterministic, globally-unique per-spectrum provenance ID.
+
+    enveda/Spectraverse carry a native per-spectrum TITLE -> use it verbatim. Merlin *_ms2 blocks are
+    PSEUDO-MS2 (a merged MSn tree) whose ``USI=`` is a *list* of every merged scan, shared across a
+    molecule's variants -> it is NOT a per-spectrum id (using its first element produced 12,649
+    collisions in train_v1). Use the guaranteed-unique ``SOURCE#INDEX`` locator instead: step1-1
+    injects SOURCE (filename) and INDEX (per-file block index, reset per file), so the pair is unique
+    across the merged corpus. The full merged-scan reference is kept separately as provenance
+    (:func:`_first_usi`), never as the id.
+    """
+    fields = _fields_of(sublist)
     if fields.get('TITLE'):
         return fields['TITLE']
-    if fields.get('USI'):
-        return fields['USI'].split(',')[0].strip()
-    return f"{fields.get('SOURCE', '?')}#{fields.get('INDEX', '?')}"
+    return f"{_clean_source(fields.get('SOURCE', '?'))}#{fields.get('INDEX', '?')}"
+
+
+def _first_usi(sublist):
+    """A single representative source USI for a (possibly merged) spectrum, or '' — PROVENANCE ONLY,
+    never an id. Merlin's ``USI=`` is a Python-list-repr; take the first entry and strip the list
+    brackets/quotes so it is a clean canonical ``mzspec:...`` reference."""
+    usi = _fields_of(sublist).get('USI', '')
+    if not usi:
+        return ''
+    return usi.split(',')[0].strip().lstrip('[').strip().strip("'\"")
 
 
 orig_native_id_by_key = {}
+orig_usi_by_key = {}
 for sublist in info_orig:
     idx_v = next((it.split('=', 1)[1].strip() for it in sublist if it.startswith('INDEX=')), None)
     src_v = next((it.split('=', 1)[1].strip() for it in sublist if it.startswith('SOURCE=')), None)
     if idx_v is not None and src_v is not None:
         orig_native_id_by_key[(idx_v, src_v)] = _native_spectrum_id(sublist)
+        orig_usi_by_key[(idx_v, src_v)] = _first_usi(sublist)
 
 for sublist2 in info_processed:
     index2 = [item for item in sublist2 if item.startswith('INDEX=')][0]
@@ -581,6 +601,11 @@ df['ORIGINAL_ID'] = [
     for _i, _s in zip(df['INDEX'], df['SOURCE'])
 ]
 df['ORIGINAL_INDEX'] = df['INDEX']
+# A single representative source USI per spectrum (provenance; blank for sources without USIs).
+df['ORIGINAL_USI'] = [
+    orig_usi_by_key.get((str(_i).strip(), str(_s).strip()), '')
+    for _i, _s in zip(df['INDEX'], df['SOURCE'])
+]
 df = df.drop(columns=['INDEX'])
 
 
@@ -594,7 +619,10 @@ with open(output_mgf_dir, 'w') as mgf_file:
         mgf_file.write("BEGIN IONS\n")
 
         mgf_file.write("TITLE={}\n".format(df['TITLE'][i]))
-        mgf_file.write("TITLE={}\n".format(df['SOURCE'][i]))
+        # One TITLE per block. The origin filename is its own field (not a second TITLE, which broke
+        # downstream MGF parsers that take the first TITLE as the id).
+        mgf_file.write("ORIGIN_DATASET={}\n".format(df['SOURCE'][i]))
+        mgf_file.write("ORIGINAL_USI={}\n".format(df['ORIGINAL_USI'][i]))
         mgf_file.write("FORMULA={}\n".format(df['FORMULA'][i]))
         mgf_file.write("SMILES={}\n".format(df['SMILES'][i]))
         mgf_file.write("INCHI={}\n".format(df['INCHI'][i]))

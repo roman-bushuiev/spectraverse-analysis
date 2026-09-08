@@ -14,9 +14,12 @@ Configuration (env vars):
 CLI usage (matches the orchestrator convention):
     python step3-8_assign-ids.py <input_csv> <input_mgf> <output_csv> <output_mgf>
 
-The MGF carries two TITLE lines per BEGIN IONS block (primary ID + provenance
-SOURCE filename, see step3-7_metadata.py:560-561). This script rewrites only
-the FIRST TITLE in each block; the second is passed through verbatim.
+The MGF carries one TITLE line per BEGIN IONS block (the primary ID; the origin
+filename is a separate ORIGIN_DATASET field, see step3-7_metadata.py). This script
+rewrites that first TITLE in each block.
+
+In provenance mode (SPECTRAVERSE_ID_FROM_PROVENANCE=1, used by train_v2) the id is
+the deterministic native-or-locator ORIGINAL_ID from step3-7 rather than a counter.
 """
 import os
 import shutil
@@ -33,20 +36,24 @@ output_mgf = sys.argv[4]
 
 prefix = os.environ.get("SPECTRAVERSE_ID_PREFIX", "").strip()
 width_raw = os.environ.get("SPECTRAVERSE_ID_WIDTH", "9").strip()
+# Provenance mode (train_v2): the id IS the deterministic native-or-locator ORIGINAL_ID from step3-7
+# (enveda/Spectraverse native TITLE, else SOURCE#INDEX), re-run-stable and collision-free — NOT the
+# order-dependent counter. `prefix` then acts only as an optional namespace (left empty in v2).
+from_provenance = os.environ.get("SPECTRAVERSE_ID_FROM_PROVENANCE", "").strip().lower() in ("1", "true", "yes")
 try:
     width = int(width_raw)
 except ValueError:
     width = 9
 
-if not prefix:
-    print("[step3-8] SPECTRAVERSE_ID_PREFIX is not set; passing inputs through unchanged.")
+if not prefix and not from_provenance:
+    print("[step3-8] no id scheme configured (prefix unset, provenance mode off); passing through.")
     if os.path.abspath(input_csv) != os.path.abspath(output_csv):
         shutil.copyfile(input_csv, output_csv)
     if os.path.abspath(input_mgf) != os.path.abspath(output_mgf):
         shutil.copyfile(input_mgf, output_mgf)
     sys.exit(0)
 
-print(f"[step3-8 config] prefix={prefix!r}, width={width}")
+print(f"[step3-8 config] from_provenance={from_provenance}, prefix={prefix!r}, width={width}")
 
 
 # --- CSV: rewrite TITLE column ---
@@ -54,7 +61,16 @@ df = pd.read_csv(input_csv, low_memory=False)
 if "TITLE" not in df.columns:
     raise SystemExit("[step3-8] Expected TITLE column missing from input CSV; refusing to write.")
 
-df["TITLE"] = [f"{prefix}{i + 1:0{width}d}" for i in range(len(df))]
+if from_provenance:
+    if "ORIGINAL_ID" not in df.columns:
+        raise SystemExit("[step3-8] SPECTRAVERSE_ID_FROM_PROVENANCE set but ORIGINAL_ID column missing "
+                         "(step3-7 must run first).")
+    ids = df["ORIGINAL_ID"].astype(str).tolist()
+    if prefix:  # optional namespace; v2 leaves prefix empty -> native/locator ids verbatim
+        ids = [f"{prefix}:{x}" for x in ids]
+else:
+    ids = [f"{prefix}{i + 1:0{width}d}" for i in range(len(df))]
+df["TITLE"] = ids
 csv_tmp = output_csv + ".tmp"
 df.to_csv(csv_tmp, index=False)
 os.replace(csv_tmp, output_csv)
@@ -80,7 +96,7 @@ with open(input_mgf, "r") as fin, open(mgf_tmp, "w") as fout:
             fout.write(line)
             continue
         if in_block and line.startswith("TITLE=") and not title_seen_in_block:
-            new_id = f"{prefix}{spectrum_idx + 1:0{width}d}"
+            new_id = ids[spectrum_idx] if spectrum_idx < len(ids) else f"{prefix}{spectrum_idx + 1:0{width}d}"
             fout.write(f"TITLE={new_id}\n")
             title_seen_in_block = True
             continue
