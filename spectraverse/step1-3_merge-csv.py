@@ -15,7 +15,7 @@ csv_files = sorted(csv_files)
 csv_file_names = [os.path.basename(f) for f in csv_files]
 
 csv_dfs = []
-columns = ['INDEX', 'TITLE', 'SOURCE' ,'SMILES', 'INCHI','INCHIKEY', 'INCHIAUX', 'IONMODE', 'PRECURSOR_MZ', 'PEPMASS', 'CHARGE', 'NUM_PEAKS', 'ADDUCT', 'NUM_PEAKS', 'MS_LEVEL', 'COMPOUND_NAME', 'SPECTRUMID']
+columns = ['INDEX', 'TITLE', 'SOURCE' ,'SMILES', 'INCHI','INCHIKEY', 'INCHIAUX', 'IONMODE', 'PRECURSOR_MZ', 'PEPMASS', 'CHARGE', 'NUM_PEAKS', 'ADDUCT', 'MS_LEVEL', 'COMPOUND_NAME', 'SPECTRUMID']
 
 for csv_file in csv_files:
     print(csv_file)
