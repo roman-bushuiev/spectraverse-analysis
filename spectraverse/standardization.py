@@ -150,7 +150,7 @@ def NeutraliseCharges(mol, reactions=None):
             mol = rms[0]
     return mol
 
-def preprocess_mol(smiles, stereochem=False, standardize_tautomers=None):
+def preprocess_mol(smiles, stereochem=False, standardize_tautomers=None, neutralize=True):
     if standardize_tautomers is None:
         standardize_tautomers = DEFAULT_STANDARDIZE_TAUTOMERS
     """
@@ -202,12 +202,15 @@ def preprocess_mol(smiles, stereochem=False, standardize_tautomers=None):
     
     charge_before = sum(atom.GetFormalCharge() for atom in parent_clean_mol.GetAtoms())
     
-    # two different approaches to neutralizing charges
-    uncharged_parent_clean_mol = uncharger.uncharge(parent_clean_mol)
-    # manual double-check
-    uncharged_parent_clean_mol2 = NeutraliseCharges(uncharged_parent_clean_mol)
-    # run uncharger again
-    uncharged_parent_clean_mol3 = uncharger.uncharge(uncharged_parent_clean_mol2)
+    # two different approaches to neutralizing charges (gated so a caller can keep formal charges)
+    if neutralize:
+        uncharged_parent_clean_mol = uncharger.uncharge(parent_clean_mol)
+        # manual double-check
+        uncharged_parent_clean_mol2 = NeutraliseCharges(uncharged_parent_clean_mol)
+        # run uncharger again
+        uncharged_parent_clean_mol3 = uncharger.uncharge(uncharged_parent_clean_mol2)
+    else:
+        uncharged_parent_clean_mol3 = parent_clean_mol
     
     charge_after = sum(atom.GetFormalCharge() for atom in uncharged_parent_clean_mol3.GetAtoms())
     
