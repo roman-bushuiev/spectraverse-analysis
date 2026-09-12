@@ -2,10 +2,7 @@ import pandas as pd
 import numpy as np
 import re, os, sys, math
 from rdkit import Chem
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import requests
 from rdkit.Chem import Descriptors
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 print("Step1-5: CSV to MGF conversion (accomplished with metadata modification)")
 
@@ -124,37 +121,11 @@ smiles_na_unique = ref['COMPOUND_NAME'].unique()
 for i, compound in enumerate(smiles_na_unique):
     metadata.loc[(metadata['SMILES'].isna()) & (metadata['COMPOUND_NAME'] == compound), 'SMILES'] = ref['SMILES'][i]
 
-def get_compound_name_from_gnps(spectrum_id):
-    print(f"Processing spectrum ID {spectrum_id}")
-    url = f"https://gnps.ucsd.edu/ProteoSAFe/SpectrumCommentServlet?SpectrumID={spectrum_id}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        if 'annotations' in data and len(data['annotations']) > 0:
-            compound_name = data['annotations'][0].get('Compound_Name', None)
-            return compound_name
-        else:
-            print(f"No annotations found for spectrum ID {spectrum_id}")
-            return None
-    else:
-        print(f"Failed to retrieve data for spectrum ID {spectrum_id}")
-        return None
-
-def process_row(row):
-    if row['SOURCE'] == 'matchms_select.mgf' and pd.isna(row['SMILES']) and (pd.isna(row['INCHI'])):
-        return get_compound_name_from_gnps(row['SPECTRUMID'])
-    else:
-        return row['COMPOUND_NAME']
-
-with ThreadPoolExecutor() as executor:
-    futures = {executor.submit(process_row, row): index for index, row in metadata.iterrows()}
-    for future in as_completed(futures):
-        index = futures[future]
-        try:
-            result = future.result()
-            metadata.at[index, 'COMPOUND_NAME'] = result
-        except Exception as e:
-            print(f"Error processing row {index}: {e}")
+# COMPOUND_NAME is kept as provided by the source. The previous version made a
+# live GNPS REST call (requests.get to gnps.ucsd.edu) here to look up names for
+# matchms_select.mgf rows with missing structures -- a network dependency that
+# breaks reproducible offline builds. COMPOUND_NAME is metadata only (never used
+# for training or matching), so the lookup was removed.
 
 def calculate_exact_mass(smiles):
     try:
