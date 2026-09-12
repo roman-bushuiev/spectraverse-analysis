@@ -77,23 +77,48 @@ def _native_spectrum_id(sublist):
 
 
 def _first_usi(sublist):
-    """A single representative source USI for a (possibly merged) spectrum, or '' — PROVENANCE ONLY,
-    never an id. Merlin's ``USI=`` is a Python-list-repr; take the first entry and strip the list
-    brackets/quotes so it is a clean canonical ``mzspec:...`` reference."""
+    """A single representative source USI for a (possibly merged) spectrum, or '' -- PROVENANCE
+    ONLY, never an id. The representative is the head of the fully-parsed contributing-USI list
+    (:func:`_all_usis`), so it is a clean canonical ``mzspec:...`` reference and always equals the
+    first element of MERGED_SOURCE_USIS (the old split(',')[0] left a trailing ``']`` on
+    single-element Merlin lists)."""
+    all_u = _all_usis(sublist)
+    return all_u.split(';')[0] if all_u else ''
+
+
+def _all_usis(sublist):
+    """All contributing source USIs for a (possibly merged pseudo-MS2) spectrum, ';'-joined
+    for full traceback, or '' -- PROVENANCE ONLY, never an id. Merlin's ``USI=`` is a
+    Python-list-repr of every merged scan; parse the whole list (semicolon-joined so the value
+    stays comma-free through CSV/MGF round-trips). A non-merged spectrum yields its single USI."""
     usi = _fields_of(sublist).get('USI', '')
     if not usi:
         return ''
-    return usi.split(',')[0].strip().lstrip('[').strip().strip("'\"")
+    s = usi.strip()
+    parts = None
+    try:
+        import ast
+        val = ast.literal_eval(s)
+        if isinstance(val, (list, tuple)):
+            parts = [str(x) for x in val]
+    except Exception:
+        parts = None
+    if parts is None:
+        parts = s.lstrip('[').rstrip(']').split(',')
+    cleaned = [p.strip().strip("'\"").strip() for p in parts]
+    return ';'.join(p for p in cleaned if p)
 
 
 orig_native_id_by_key = {}
 orig_usi_by_key = {}
+orig_all_usis_by_key = {}
 for sublist in info_orig:
     idx_v = next((it.split('=', 1)[1].strip() for it in sublist if it.startswith('INDEX=')), None)
     src_v = next((it.split('=', 1)[1].strip() for it in sublist if it.startswith('SOURCE=')), None)
     if idx_v is not None and src_v is not None:
         orig_native_id_by_key[(idx_v, src_v)] = _native_spectrum_id(sublist)
         orig_usi_by_key[(idx_v, src_v)] = _first_usi(sublist)
+        orig_all_usis_by_key[(idx_v, src_v)] = _all_usis(sublist)
 
 for sublist2 in info_processed:
     index2 = [item for item in sublist2 if item.startswith('INDEX=')][0]
@@ -606,6 +631,12 @@ df['ORIGINAL_USI'] = [
     orig_usi_by_key.get((str(_i).strip(), str(_s).strip()), '')
     for _i, _s in zip(df['INDEX'], df['SOURCE'])
 ]
+# Full contributing-USI list (';'-joined) so merged pseudo-MS2 spectra are traceable to every
+# scan they merge, not just the representative ORIGINAL_USI above.
+df['MERGED_SOURCE_USIS'] = [
+    orig_all_usis_by_key.get((str(_i).strip(), str(_s).strip()), '')
+    for _i, _s in zip(df['INDEX'], df['SOURCE'])
+]
 df = df.drop(columns=['INDEX'])
 
 
@@ -623,6 +654,7 @@ with open(output_mgf_dir, 'w') as mgf_file:
         # downstream MGF parsers that take the first TITLE as the id).
         mgf_file.write("ORIGIN_DATASET={}\n".format(df['SOURCE'][i]))
         mgf_file.write("ORIGINAL_USI={}\n".format(df['ORIGINAL_USI'][i]))
+        mgf_file.write("MERGED_SOURCE_USIS={}\n".format(df['MERGED_SOURCE_USIS'][i]))
         mgf_file.write("FORMULA={}\n".format(df['FORMULA'][i]))
         mgf_file.write("SMILES={}\n".format(df['SMILES'][i]))
         mgf_file.write("INCHI={}\n".format(df['INCHI'][i]))
