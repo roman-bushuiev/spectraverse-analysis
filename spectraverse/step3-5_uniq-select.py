@@ -44,8 +44,6 @@ dup_df['NUM_PEAKS'] = pd.to_numeric(dup_df['NUM_PEAKS'])
 # remove duplicate spectra above a minimum dot-product, keeping the one with the most peaks
 min_dot_prod = 0.99
 
-commecial_data = ['nist_23_hr_msms_new.mgf', 'nist_23_hr_msms2_new.mgf', 'agilent_fold_csv_matchms.mgf']
- 
 def process_identifier(identifier):
     dup_entries = dup_df[dup_df['unique_identifier'] == identifier]
     numpy_filepath = numpy_dir + '/{}.npy'.format(identifier)
@@ -57,10 +55,9 @@ def process_identifier(identifier):
     drop_indexes = []
     for pairs in index_pairs:
         row = dup_entries.iloc[pairs]
-        if row['SOURCE'].isin(commecial_data).any():
-            drop_index = row[row['SOURCE'].isin(commecial_data)].index
-            if len(drop_index) > 1:
-                drop_index = row['NUM_PEAKS'].idxmin()
+        # keep the spectrum with the most peaks (line 44 comment); the former
+        # NIST/Agilent source-preference block here was dead code -- it was
+        # unconditionally overwritten by this idxmin, so removing it is a no-op.
         drop_index = row['NUM_PEAKS'].idxmin()
         drop_indexes.append(drop_index)
     drop_indexes = list(set(drop_indexes))
