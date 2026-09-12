@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spectraverse"
+version = "0.1.0"
+description = "Spectraverse MS/MS curation pipeline. Its standardization module (spectraverse.standardization) is the single validated molecule standardizer reused by DreaMS-Mol's standardize_smiles."
+requires-python = ">=3.9"
+# Deliberately no dependencies: install with `--no-deps`. The standardization leaf needs only rdkit,
+# which the consuming environments already provide; the full curation pipeline's deps live in
+# requirements.txt / environment.yml and are installed separately when running the steps.
+
+[tool.setuptools]
+# Package ONLY the importable spectraverse package. Do NOT expose the repo root (it contains a
+# `matchms/` config directory that would shadow the real matchms package on sys.path).
+packages = ["spectraverse"]
